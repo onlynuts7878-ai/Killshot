@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Split Site</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--sand:#e8b04a;--hot:#ff5a4d;--ok:#3dffb5}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:#10141b;font:600 17px Rajdhani,system-ui,sans-serif;color:#fff;user-select:none}
+canvas{display:block}.ov{position:fixed;inset:0}
+#menu{display:flex;align-items:center;padding:0 6vw;background:linear-gradient(90deg,rgba(10,13,19,.94),rgba(10,13,19,.6) 45%,transparent 78%)}
+#panel{width:min(380px,100%)}
+h1{font-size:68px;line-height:.9;margin:0 0 4px;font-weight:700}
+#panel p{margin:0 0 18px;color:#aab3c2}
+input[type=text]{width:100%;padding:11px;margin:4px 0;background:#1a212d;border:1px solid #2c3647;color:#fff;font:600 18px Rajdhani;border-radius:3px}
+.b{display:block;width:100%;padding:12px;margin:8px 0;border:0;background:var(--sand);color:#1b1406;font:700 19px Rajdhani;cursor:pointer;border-radius:3px}
+.b.alt{background:#242c3a;color:#fff}.b:hover{filter:brightness(1.12)}
+.row{display:flex;gap:8px}.row input{flex:1}.row .b{width:110px;margin:4px 0}
+label{display:flex;justify-content:space-between;margin-top:12px;color:#aab3c2}
+input[type=range]{width:55%;accent-color:var(--sand)}
+#status{min-height:22px;margin-top:10px;color:var(--sand)}
+#hud{display:none;pointer-events:none}
+#vig{box-shadow:inset 0 0 140px 30px #f33;opacity:0;transition:opacity .6s}
+#cross i{position:fixed;background:var(--ok);left:50%;top:50%}
+#cross i:nth-child(1){width:2px;height:7px;margin:-12px 0 0 -1px}#cross i:nth-child(2){width:2px;height:7px;margin:5px 0 0 -1px}
+#cross i:nth-child(3){width:7px;height:2px;margin:-1px 0 0 -12px}#cross i:nth-child(4){width:7px;height:2px;margin:-1px 0 0 5px}
+#hm{position:fixed;left:50%;top:50%;width:20px;height:20px;margin:-10px;border:2px solid #fff;transform:rotate(45deg);opacity:0;transition:opacity .25s}
+#room{position:fixed;left:16px;top:12px;color:#d9dfe9}
+#feed{position:fixed;right:16px;top:12px;text-align:right;line-height:1.5;text-shadow:0 1px 3px #000}
+#hp{position:fixed;left:20px;bottom:18px;width:240px}#hp b{font-size:44px}
+#hp u{display:block;height:6px;background:#0008}#hp s{display:block;height:100%;width:100%;background:var(--ok);transition:width .2s}
+#ammo{position:fixed;right:22px;bottom:18px;font-size:44px;font-weight:700}
+#dead{position:fixed;left:0;right:0;top:35%;text-align:center;font-size:36px;color:var(--hot);display:none}
+#sb{position:fixed;left:50%;top:18%;transform:translateX(-50%);min-width:340px;background:#0b0f16d9;border-collapse:collapse;display:none}
+#sb td,#sb th{padding:6px 16px;text-align:left}#sb td+td,#sb th+th{text-align:right}
+#pause{display:none;align-items:center;justify-content:center;text-align:center;background:#0a0d13b8;cursor:pointer}
+#pause h2{font-size:44px;margin:0}#pause .b{width:200px;margin:14px auto}
+</style></head><body>
+
+<div id="menu" class="ov"><div id="panel">
+  <h1>SPLIT SITE</h1><p>Browser arena shooter. Two bomb sites, one mid.</p>
+  <input type="text" id="name" maxlength="12" placeholder="Your name">
+  <button class="b" id="host">Create room</button>
+  <div class="row"><input type="text" id="code" maxlength="4" placeholder="Room code"><button class="b alt" id="join">Join</button></div>
+  <button class="b alt" id="solo">Practice vs bots</button>
+  <label>Sensitivity <input type="range" id="sens" min="1" max="10" value="4"></label>
+  <label>Field of view <input type="range" id="fov" min="60" max="110" value="80"></label>
+  <div id="status"></div>
+</div></div>
+
+<div id="hud" class="ov">
+  <div id="vig" class="ov"></div><div id="cross"><i></i><i></i><i></i><i></i></div><div id="hm"></div>
+  <div id="room"></div><div id="feed"></div>
+  <div id="hp"><b id="hpn">100</b><u><s id="hpb"></s></u></div>
+  <div id="ammo"></div><div id="dead">Respawning…</div><table id="sb"></table>
+</div>
+<div id="pause" class="ov"><div><h2>Paused</h2><p>Click anywhere to resume</p><button class="b alt" id="leave">Leave game</button></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(80, innerWidth / innerHeight, .1, 300);
+cam.rotation.order = 'YXZ'; scene.add(cam);
+const R = new THREE.WebGLRenderer({ antialias: true });
+R.setSize(innerWidth, innerHeight); R.setPixelRatio(Math.min(devicePixelRatio, 2));
+R.outputEncoding = THREE.sRGBEncoding; R.toneMapping = THREE.ACESFilmicToneMapping;
+R.shadowMap.enabled = true; R.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.prepend(R.domElement);
+scene.fog = new THREE.Fog(0xd9c7a6, 40, 130);
+
+// ---------- Lighting and sky ----------
+scene.add(new THREE.HemisphereLight(0xbfd8ff, 0x8a7550, .75));
+const sun = new THREE.DirectionalLight(0xfff0d0, 1.5);
+sun.position.set(35, 55, 25); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -55, right: 55, top: 55, bottom: -55, near: 1, far: 160 });
+sun.shadow.bias = -.0006; scene.add(sun);
+const sky = new THREE.Mesh(new THREE.SphereGeometry(150, 16, 8), new THREE.ShaderMaterial({
+  side: THREE.BackSide, fog: false, depthWrite: false,
+  vertexShader: 'varying vec3 p;void main(){p=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+  fragmentShader: 'varying vec3 p;void main(){float h=clamp(normalize(p).y*1.6,0.,1.);gl_FragColor=vec4(mix(vec3(.85,.78,.65),vec3(.3,.55,.9),h),1.);}'
+}));
+scene.add(sky);
+
+// ---------- Procedural textures ----------
+const L = (x, a, b, c, d) => { x.beginPath(); x.moveTo(a, b); x.lineTo(c, d); x.stroke(); };
+function tex(f) {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const x = c.getContext('2d'); f(x);
+  const d = x.getImageData(0, 0, 256, 256), a = d.data;
+  for (let i = 0; i < a.length; i += 4) { const n = (Math.random() - .5) * 34; a[i] += n; a[i + 1] += n; a[i + 2] += n; }
+  x.putImageData(d, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.encoding = THREE.sRGBEncoding; t.anisotropy = 8; return t;
+}
+const T = {
+  c: tex(x => { x.fillStyle = '#8a8d94'; x.fillRect(0, 0, 256, 256); x.strokeStyle = '#5d6068'; x.lineWidth = 3;
+    for (let i = 0; i <= 256; i += 128) { L(x, i, 0, i, 256); L(x, 0, i, 256, i); }
+    for (let i = 0; i < 40; i++) { x.fillStyle = `rgba(0,0,0,${Math.random() * .08})`; x.fillRect(Math.random() * 256, Math.random() * 256, 40, 40); } }),
+  p: tex(x => { x.fillStyle = '#cdb287'; x.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 60; i++) { x.fillStyle = `rgba(90,60,20,${Math.random() * .1})`; x.beginPath(); x.arc(Math.random() * 256, Math.random() * 256, 10 + Math.random() * 30, 0, 7); x.fill(); } }),
+  b: tex(x => { x.fillStyle = '#4a3028'; x.fillRect(0, 0, 256, 256);
+    for (let r = 0; r < 8; r++) for (let k = -1; k < 4; k++) { x.fillStyle = `hsl(${12 + Math.random() * 10},${45 + Math.random() * 15}%,${32 + Math.random() * 12}%)`; x.fillRect(k * 64 + (r % 2 ? 32 : 0) + 2, r * 32 + 2, 60, 28); } }),
+  w: tex(x => { x.fillStyle = '#8c5c2c'; x.fillRect(0, 0, 256, 256); x.strokeStyle = '#4b2e14'; x.lineWidth = 4;
+    for (let i = 0; i < 256; i += 64) L(x, 0, i, 256, i);
+    for (let i = 0; i < 80; i++) { x.strokeStyle = `rgba(50,25,5,${Math.random() * .3})`; x.lineWidth = 1; const y = Math.random() * 256; L(x, 0, y, 256, y + Math.random() * 4); }
+    x.strokeStyle = '#4b2e14'; x.lineWidth = 8; x.strokeRect(4, 4, 248, 248); L(x, 0, 0, 256, 256); L(x, 256, 0, 0, 256); }),
+  f: tex(x => { x.fillStyle = '#8c8372'; x.fillRect(0, 0, 256, 256); x.strokeStyle = '#5f594c'; x.lineWidth = 3;
+    for (let i = 0; i <= 256; i += 64) { L(x, i, 0, i, 256); L(x, 0, i, 256, i); } })
+};
+const M = {};
+for (const k in T) M[k] = new THREE.MeshStandardMaterial({ map: T[k], bumpMap: T[k], bumpScale: 2, roughness: .92 });
+T.f.repeat.set(20, 20);
+
+// ---------- Map: [x, z, width, depth, height, material c/p/b/w] ----------
+const MAP = [
+  [0,-40,80,1,8,'b'],[0,40,80,1,8,'b'],[-40,0,1,80,8,'b'],[40,0,1,80,8,'b'],
+  [-10,-5,1,30,6,'p'],[10,-5,1,30,6,'p'],[0,-15,6,6,3,'w'],
+  [-25,-30,12,2,4,'p'],[-31,-20,2,12,4,'p'],[-22,-22,3,3,2.2,'w'],
+  [25,-30,12,2,4,'p'],[31,-20,2,12,4,'p'],[22,-22,3,3,2.2,'w'],
+  [-22,8,16,1,5,'p'],[22,8,16,1,5,'p'],
+  [0,25,5,1,2,'c'],[-14,22,3,3,2,'w'],[14,22,3,3,2,'w'],[-26,-8,4,4,3,'c'],[26,-8,4,4,3,'c']
+];
+const solids = [], boxes = [];
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), M.f);
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor); solids.push(floor);
+MAP.forEach(([x, z, w, d, h, m]) => {
+  const g = new THREE.BoxGeometry(w, h, d), uv = g.attributes.uv, dims = [[d,h],[d,h],[w,d],[w,d],[w,h],[w,h]];
+  for (let f = 0; f < 6; f++) for (let i = 0; i < 4; i++) { const k = f * 4 + i; uv.setXY(k, uv.getX(k) * dims[f][0] / 4, uv.getY(k) * dims[f][1] / 4); }
+  const mesh = new THREE.Mesh(g, M[m]); mesh.position.set(x, h / 2, z);
+  mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh); solids.push(mesh);
+  boxes.push({ x0: x - w / 2, x1: x + w / 2, z0: z - d / 2, z1: z + d / 2, h });
+});
+[['A', -25, -22], ['B', 25, -22]].forEach(([t, x, z]) => {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+  g.fillStyle = 'rgba(232,176,74,.8)'; g.font = '700 110px Rajdhani,sans-serif'; g.textAlign = 'center'; g.fillText(t, 64, 100);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(7, 7), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
+  m.rotation.x = -Math.PI / 2; m.position.set(x, .03, z + 4); scene.add(m);
+});
+const blocked = (x, z, y, r) => boxes.some(b => y < b.h && x > b.x0 - r && x < b.x1 + r && z > b.z0 - r && z < b.z1 + r);
+const SP = [[-30,34],[0,34],[30,34],[-34,-34],[34,-34]];
+
+// ---------- State ----------
+const me = { name: 'Player', k: 0, d: 0, hp: 100 }, others = {}, P = { x: 0, y: 1.7, z: 34, vy: 0, yaw: 0, pitch: 0, ground: true }, keys = {};
+let myId = 'solo', peer, conns = [], isHost = false, inGame = false, locked = false;
+let dead = 0, ammo = 30, reload = 0, firing = false, nextShot = 0, recoil = 0;
+const gun = new THREE.Mesh(new THREE.BoxGeometry(.12, .14, .6), new THREE.MeshStandardMaterial({ color: 0x20242c, roughness: .5, metalness: .6 }));
+gun.position.set(.3, -.28, -.55); cam.add(gun);
+const muzzle = new THREE.PointLight(0xffc860, 0, 8); muzzle.position.set(.3, -.2, -1.1); cam.add(muzzle);
+function spawn() { const s = SP[Math.random() * SP.length | 0]; Object.assign(P, { x: s[0], z: s[1], y: 1.7, vy: 0 }); me.hp = 100; ammo = 30; reload = 0; }
+
+// ---------- Player models ----------
+function mkPlayer(name, col) {
+  const g = new THREE.Group(), mat = c => new THREE.MeshStandardMaterial({ color: c, roughness: .8 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(.7, 1.1, .45), mat(col)), head = new THREE.Mesh(new THREE.BoxGeometry(.4, .4, .4), mat(0xe0b894));
+  const gn = new THREE.Mesh(new THREE.BoxGeometry(.1, .12, .7), mat(0x1b1e24));
+  body.position.y = .85; head.position.y = 1.65; gn.position.set(.3, 1.1, -.4); head.userData.head = 1;
+  [body, head, gn].forEach(m => m.castShadow = true); g.add(body, head, gn);
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64; const x = c.getContext('2d');
+  x.font = '700 40px Rajdhani,sans-serif'; x.textAlign = 'center'; x.fillStyle = '#fff'; x.strokeStyle = '#000'; x.lineWidth = 5;
+  x.strokeText(name, 128, 44); x.fillText(name, 128, 44);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthWrite: false }));
+  s.scale.set(2, .5, 1); s.position.y = 2.25; g.add(s); scene.add(g);
+  return { g, parts: [body, head], p: new THREE.Vector3(), yaw: 0, hp: 100, k: 0, d: 0, name };
+}
+function getO(id, name) {
+  if (others[id]) return others[id];
+  let h = 0; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  const o = mkPlayer(name || 'Player', new THREE.Color().setHSL(h / 360, .5, .42)); o.id = id; return others[id] = o;
+}
+function mkBot(i) {
+  const o = mkPlayer('Bot ' + (i + 1), 0x7a3b3b); o.id = 'bot' + i; o.bot = 1; o.t = new THREE.Vector3(); others[o.id] = o; placeBot(o);
+}
+function placeBot(o) {
+  let x, z; do { x = (Math.random() - .5) * 70; z = (Math.random() - .5) * 70; } while (blocked(x, z, 0, 1));
+  o.g.position.set(x, 0, z); o.t.set(x, 0, z); o.hp = 100;
+}
+
+// ---------- Networking (WebRTC via PeerJS, no server needed) ----------
+const send = d => conns.forEach(c => c.open && c.send(d));
+function wire(c) {
+  c.on('data', d => { if (isHost) conns.forEach(x => x !== c && x.open && x.send(d)); if (d.t === 's') c.pid = d.id; onMsg(d); });
+  c.on('close', () => {
+    if (!isHost) { alert('Disconnected from host'); return location.reload(); }
+    conns = conns.filter(x => x !== c); if (c.pid) { onMsg({ t: 'l', id: c.pid }); send({ t: 'l', id: c.pid }); }
+  });
+}
+function onMsg(d) {
+  if (d.t === 's') {
+    const o = getO(d.id, d.n); o.p.set(d.x, d.y - 1.7, d.z); o.yaw = d.yaw; o.hp = d.hp;
+    if (!o.init) { o.g.position.copy(o.p); o.init = 1; }
+  } else if (d.t === 'h' && d.to === myId) hurt(d);
+  else if (d.t === 'k') onKill(d);
+  else if (d.t === 'f') tracer(new THREE.Vector3(...d.a), new THREE.Vector3(...d.b));
+  else if (d.t === 'l' && others[d.id]) { scene.remove(others[d.id].g); delete others[d.id]; }
+}
+const nm = id => id === myId ? me.name : (others[id] ? others[id].name : '?');
+function hurt(d) {
+  if (dead) return; me.hp -= d.dmg; $('vig').style.opacity = 1; setTimeout(() => $('vig').style.opacity = 0, 150);
+  if (me.hp <= 0) { me.hp = 0; dead = 2.5; const e = { t: 'k', by: d.by, vic: myId, hs: d.hs }; send(e); onKill(e); }
+}
+function onKill(e) {
+  const a = e.by === myId ? me : others[e.by], v = e.vic === myId ? me : others[e.vic];
+  if (a) a.k++; if (v) v.d++;
+  const f = document.createElement('div'); f.textContent = `${nm(e.by)}  ▸  ${nm(e.vic)}${e.hs ? '  (headshot)' : ''}`;
+  $('feed').prepend(f); setTimeout(() => f.remove(), 4500);
+}
+
+// ---------- Menu ----------
+const status = t => $('status').textContent = t;
+const prep = () => { me.name = $('name').value.trim().slice(0, 12) || 'Player' + (10 + Math.random() * 89 | 0); };
+function begin(label) {
+  inGame = true; $('menu').style.display = 'none'; $('hud').style.display = 'block'; $('room').textContent = label; spawn(); updPause();
+}
+function host() {
+  const code = Math.random().toString(36).slice(2, 6).toUpperCase(); peer = new Peer('splitsite-' + code);
+  peer.on('open', id => { myId = id; isHost = true; begin('Room code: ' + code); });
+  peer.on('connection', c => { conns.push(c); wire(c); });
+  peer.on('error', e => e.type === 'unavailable-id' ? host() : status('Network error: ' + e.type));
+}
+$('host').onclick = () => { prep(); status('Creating room…'); host(); };
+$('join').onclick = () => {
+  prep(); const code = $('code').value.trim().toUpperCase(); if (code.length < 4) return status('Enter the 4-letter room code.');
+  status('Joining…'); peer = new Peer();
+  peer.on('open', id => {
+    myId = id; const c = peer.connect('splitsite-' + code, { reliable: true }); conns = [c]; wire(c);
+    c.on('open', () => begin('Room code: ' + code));
+    setTimeout(() => { if (!inGame) status('Could not reach that room. Check the code.'); }, 8000);
+  });
+  peer.on('error', e => status('Could not join: ' + e.type));
+};
+$('solo').onclick = () => { prep(); for (let i = 0; i < 6; i++) mkBot(i); begin('Practice (bots do not shoot back yet)'); };
+$('leave').onclick = () => location.reload();
+$('fov').oninput = e => { cam.fov = +e.target.value; cam.updateProjectionMatrix(); };
+const updPause = () => $('pause').style.display = inGame && !locked ? 'flex' : 'none';
+$('pause').onclick = e => { if (e.target.id !== 'leave') R.domElement.requestPointerLock(); };
+document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === R.domElement; updPause(); });
+
+// ---------- Input ----------
+addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Tab') e.preventDefault(); if (e.code === 'KeyR' && !reload && ammo < 30) reload = 1.4; });
+addEventListener('keyup', e => keys[e.code] = false);
+addEventListener('mousemove', e => { if (!locked) return; const s = $('sens').value * .0005; P.yaw -= e.movementX * s; P.pitch = Math.max(-1.5, Math.min(1.5, P.pitch - e.movementY * s)); });
+addEventListener('mousedown', () => firing = locked);
+addEventListener('mouseup', () => firing = false);
+addEventListener('resize', () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); R.setSize(innerWidth, innerHeight); });
+
+// ---------- Shooting ----------
+const ray = new THREE.Raycaster(), tr = [];
+let ac;
+function snd() {
+  ac = ac || new AudioContext(); const b = ac.createBuffer(1, 4410, 44100), d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2;
+  const s = ac.createBufferSource(), g = ac.createGain(); g.gain.value = .22; s.buffer = b; s.connect(g).connect(ac.destination); s.start();
+}
+function tracer(a, b) {
+  const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), new THREE.LineBasicMaterial({ color: 0xffe9a0, transparent: true }));
+  scene.add(l); tr.push({ l, t: .08 });
+}
+function shoot(t) {
+  if (reload || t < nextShot) return;
+  if (ammo <= 0) { reload = 1.4; return; }
+  nextShot = t + .1; ammo--; recoil = .03; muzzle.intensity = 2.5; snd();
+  const sp = (keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD) ? .06 : .015;
+  ray.setFromCamera({ x: (Math.random() - .5) * sp, y: (Math.random() - .5) * sp }, cam);
+  const parts = []; for (const id in others) { const o = others[id]; if (o.hp > 0) o.parts.forEach(p => { p.userData.o = o; parts.push(p); }); }
+  const h = ray.intersectObjects(solids.concat(parts), false)[0];
+  const end = h ? h.point : ray.ray.at(80, new THREE.Vector3()), from = cam.localToWorld(new THREE.Vector3(.3, -.25, -.8));
+  tracer(from, end); send({ t: 'f', a: from.toArray(), b: end.toArray() });
+  if (h && h.object.userData.o) {
+    const o = h.object.userData.o, hs = !!h.object.userData.head, dmg = hs ? 100 : 34;
+    $('hm').style.borderColor = hs ? '#ff5a4d' : '#fff'; $('hm').style.opacity = 1; setTimeout(() => $('hm').style.opacity = 0, 120);
+    if (o.bot) { o.hp -= dmg; if (o.hp <= 0) { onKill({ by: myId, vic: o.id, hs }); setTimeout(() => placeBot(o), 2000); } }
+    else send({ t: 'h', to: o.id, dmg, hs, by: myId });
+  }
+  if (!ammo) reload = 1.4;
+}
+
+// ---------- Main loop ----------
+let last = performance.now(), acc = 0, tt = 0;
+function tick(now) {
+  requestAnimationFrame(tick);
+  const dt = Math.min((now - last) / 1000, .05); last = now; tt += dt;
+  if (inGame) {
+    if (locked && !dead) {
+      const f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0), s = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), n = Math.hypot(f, s) || 1, v = 7 * dt / n;
+      const dx = (-Math.sin(P.yaw) * f + Math.cos(P.yaw) * s) * v, dz = (-Math.cos(P.yaw) * f - Math.sin(P.yaw) * s) * v, feet = P.y - 1.7;
+      if (!blocked(P.x + dx, P.z, feet, .4)) P.x += dx;
+      if (!blocked(P.x, P.z + dz, feet, .4)) P.z += dz;
+      if (keys.Space && P.ground) { P.vy = 7; P.ground = false; }
+      P.vy -= 20 * dt; P.y += P.vy * dt; if (P.y <= 1.7) { P.y = 1.7; P.vy = 0; P.ground = true; }
+      if (firing) shoot(now / 1000);
+      if (reload > 0 && (reload -= dt) <= 0) { reload = 0; ammo = 30; }
+    }
+    if (dead && (dead -= dt) <= 0) { dead = 0; spawn(); }
+    recoil *= .85; cam.position.set(P.x, P.y - (dead ? 1.1 : 0), P.z); cam.rotation.set(P.pitch + recoil, P.yaw, dead ? .6 : 0);
+    if ((acc += dt) > .05) { acc = 0; if (conns.length) send({ t: 's', id: myId, n: me.name, x: P.x, y: P.y, z: P.z, yaw: P.yaw, hp: me.hp }); }
+  } else { cam.position.set(Math.sin(tt * .12) * 34, 13, Math.cos(tt * .12) * 34); cam.lookAt(0, 2, 0); }
+  for (const id in others) {
+    const o = others[id];
+    if (o.bot) {
+      if (o.hp > 0) {
+        const p = o.g.position, dx = o.t.x - p.x, dz = o.t.z - p.z, d = Math.hypot(dx, dz);
+        if (d < .5) o.t.set((Math.random() - .5) * 70, 0, (Math.random() - .5) * 70);
+        else { const nx = p.x + dx / d * 3 * dt, nz = p.z + dz / d * 3 * dt;
+          if (blocked(nx, nz, 0, .5)) o.t.set(p.x + (Math.random() - .5) * 10, 0, p.z + (Math.random() - .5) * 10);
+          else { p.x = nx; p.z = nz; o.g.rotation.y = Math.atan2(-dx, -dz); } }
+      }
+    } else { o.g.position.lerp(o.p, .3); o.g.rotation.y = o.yaw; }
+    o.g.visible = o.hp > 0;
+  }
+  for (let i = tr.length - 1; i >= 0; i--) { const t = tr[i]; t.t -= dt; t.l.material.opacity = Math.max(t.t / .08, 0); if (t.t <= 0) { scene.remove(t.l); tr.splice(i, 1); } }
+  muzzle.intensity *= .6; sky.position.copy(cam.position);
+  if (inGame) {
+    $('hpn').textContent = Math.ceil(me.hp); $('hpb').style.width = me.hp + '%';
+    $('ammo').textContent = reload ? 'Reloading' : ammo + ' / 30'; $('dead').style.display = dead ? 'block' : 'none';
+    $('sb').style.display = keys.Tab ? 'table' : 'none';
+    if (keys.Tab) $('sb').innerHTML = '<tr><th>Player</th><th>K</th><th>D</th></tr>' +
+      [me, ...Object.values(others)].sort((a, b) => b.k - a.k).map(p => `<tr><td>${p.name.replace(/</g, '&lt;')}</td><td>${p.k}</td><td>${p.d}</td></tr>`).join('');
+  }
+  R.render(scene, cam);
+}
+requestAnimationFrame(tick);
+</script>
+</body></html>
